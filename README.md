@@ -1,74 +1,91 @@
 # AmneziaWG Decky Plugin
 
-Плагин для управления AmneziaWG VPN прямо из Game Mode Steam Deck.
+Self-contained плагин для управления AmneziaWG VPN из Game Mode Steam Deck.
+Все нужные бинарники (`amneziawg-go`, `awg`, `awg-quick`) бандлятся внутрь плагина —
+ничего не ставится в `/usr` или `/etc`, обновления SteamOS плагин не ломают.
 
 ## Установка
 
-### 1. Установи AmneziaWG на деку
+### 1. Включи Developer mode в Decky
 
-Decky не умеет ставить системные пакеты, поэтому `awg-quick` и `awg` нужно установить руками. Подключись к деке по SSH:
+Game Mode → `•••` → **Decky** → шестерёнка (Settings) → **Developer** → **Enable Developer mode**.
 
+### 2. Установи плагин по URL
+
+Decky → **Developer** → **Install Plugin from URL** → вставь:
+
+```
+https://github.com/GordinRoman/decky-amnezia/releases/latest/download/AmneziaWG.zip
+```
+
+### 3. Положи конфиг(и) в `~/.config/amneziawg/`
+
+Через SSH с любой машины:
 ```bash
 ssh deck@<IP_АДРЕС>
+mkdir -p ~/.config/amneziawg
+# затем закинь .conf файл туда (например через scp):
+# scp ./amnezia_for_awg.conf deck@<IP>:~/.config/amneziawg/
 ```
 
-Затем:
-```bash
-sudo steamos-readonly disable
-sudo pacman-key --init && sudo pacman-key --populate archlinux
-sudo pacman -S base-devel git --noconfirm
-# yay (AUR helper)
-git clone https://aur.archlinux.org/yay.git /tmp/yay
-cd /tmp/yay && makepkg -si --noconfirm
-# Собственно AmneziaWG
-yay -S amneziawg-tools --noconfirm
-```
+Имя файла должно матчить `^[A-Za-z0-9._-]+\.conf$`.
 
-### 2. Положи конфиг
+Готово. В Game Mode → `•••` → AmneziaWG → переключи тоггл.
 
-```bash
-sudo mkdir -p /etc/amnezia/amneziawg/
-sudo cp ~/amnezia_for_awg.conf /etc/amnezia/amneziawg/
-```
+## Почему обновления SteamOS не ломают плагин
 
-Имя файла должно соответствовать `^[A-Za-z0-9._-]+\.conf$`.
+| Что | Где живёт | Переживёт обновление? |
+|---|---|---|
+| Сам плагин (UI + Python + бинарники) | `/home/deck/homebrew/plugins/AmneziaWG/` | ✅ `/home` не трогается |
+| Конфиги VPN | `/home/deck/.config/amneziawg/` | ✅ `/home` не трогается |
+| Логи | `/tmp/amneziawg.log` | ❌ Чистится при ребуте, ротация 512KB × 2 |
 
-### 3. Установи плагин через Decky
+Никаких системных пакетов через `pacman`, никаких записей в `/etc`, никакого
+`steamos-readonly disable` не нужно.
 
-В Game Mode:
+## Как это работает под капотом
 
-1. Кнопка `•••` → **Decky** → шестерёнка (Settings) → **Developer** → включи **Developer mode**.
-2. Вернись в меню Decky → внизу появится **Developer** → **Install Plugin from URL**.
-3. Вставь прямую ссылку на `.zip` из [GitHub Releases](https://github.com/GordinRoman/decky-amnezia/releases/latest) (правый клик по `AmneziaWG.zip` → Copy link).
-4. Decky скачает архив, распакует в `~/homebrew/plugins/AmneziaWG` и перезагрузит плагины.
+WireGuard и AmneziaWG обычно реализуются как **kernel module**. SteamOS такого модуля
+не имеет, поэтому модули собирают через DKMS — но DKMS живёт в `/usr/lib/modules/`
+и стирается при апдейте.
 
-## Сборка релиза
-
-Релизы собираются автоматически через GitHub Actions ([release.yml](.github/workflows/release.yml)):
+Этот плагин использует **userspace-реализацию** (`amneziawg-go`), которая создаёт
+TUN-устройство и обрабатывает протокол в user space. Никакого kernel module не нужно.
+`awg-quick` детектирует отсутствие модуля и автоматически делает fallback:
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+ip link add awg0 type amneziawg          # fails — no kernel module
+amneziawg-go awg0                         # spawns userspace impl
 ```
 
-CI запустит `npm run build`, упакует `plugin.json`, `main.py`, `package.json`, `README.md` и `dist/index.js` в `AmneziaWG.zip` и опубликует его как GitHub Release.
+Тред `amneziawg-go` форкается в фон и держит туннель.
 
-Можно так же запустить workflow вручную через **Actions → Build & Release → Run workflow** — тогда zip будет доступен как build artifact (без публикации релиза).
+Цена — чуть выше CPU и чуть ниже throughput по сравнению с kernel module
+(на типичном VPN-трафике 50-100 Mbit/s разница незаметна).
 
 ## Использование
 
-1. В Game Mode нажми `•••`
-2. Найди плагин **AmneziaWG**
-3. Если конфигов несколько — выбери нужный в dropdown
-4. Переключи тоггл для подключения/отключения
-5. Статус обновляется каждые 5 секунд
+1. В Game Mode → `•••` → **AmneziaWG**
+2. Если конфигов несколько — выбери в dropdown
+3. Переключи тоггл — VPN включится/выключится
+4. Статус опрашивается каждые 5 секунд
 
-## Структура файлов на деке
+## Структура
 
 ```
-/etc/amnezia/amneziawg/     ← конфиги (.conf)
-~/homebrew/plugins/AmneziaWG ← код плагина
-/tmp/amneziawg.log          ← логи плагина (ротация 512KB × 2)
+~/homebrew/plugins/AmneziaWG/
+├── plugin.json
+├── main.py                ← Python-бэкенд плагина
+├── dist/index.js          ← собранный фронтенд (React)
+└── bin/
+    ├── amneziawg-go       ← userspace-реализация (Go, статический)
+    ├── awg                ← CLI (C, статический)
+    └── awg-quick          ← bash-скрипт
+
+~/.config/amneziawg/
+└── *.conf                 ← твои конфиги
+
+/tmp/amneziawg.log         ← логи
 ```
 
 ## Отладка
@@ -76,3 +93,27 @@ CI запустит `npm run build`, упакует `plugin.json`, `main.py`, `p
 ```bash
 tail -f /tmp/amneziawg.log
 ```
+
+Проверить статус туннеля вручную:
+```bash
+sudo ~/homebrew/plugins/AmneziaWG/bin/awg show
+```
+
+## Релиз новой версии
+
+```bash
+git tag v1.0.x
+git push origin v1.0.x
+```
+
+[GitHub Actions](.github/workflows/release.yml):
+1. Собирает `amneziawg-go` из исходников upstream в Arch-контейнере (`CGO_ENABLED=0` → статический бинарник без зависимости от libc)
+2. Собирает `awg` из `amneziawg-tools` со статической линковкой (`LDFLAGS=-static`)
+3. Берёт `awg-quick` как есть (bash-скрипт)
+4. Билдит фронт через Rollup
+5. Пакует всё в `AmneziaWG.zip` и публикует как GitHub Release
+
+## Ручная сборка артефакта
+
+Можно запустить workflow руками: **Actions → Build & Release → Run workflow**.
+Тогда `AmneziaWG.zip` будет доступен как build artifact на странице run-а (без публикации релиза).

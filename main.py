@@ -1,6 +1,7 @@
 import subprocess
 import os
 import re
+import shutil
 import logging
 from logging.handlers import RotatingFileHandler
 
@@ -9,12 +10,29 @@ _handler = RotatingFileHandler(LOG_PATH, maxBytes=512 * 1024, backupCount=2)
 _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
 logging.basicConfig(level=logging.INFO, handlers=[_handler])
 
-CONF_DIR = "/etc/amnezia/amneziawg"
-AWG = "awg"
-AWG_QUICK = "awg-quick"
-CMD_TIMEOUT = 15
+PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
+BIN_DIR = os.path.join(PLUGIN_DIR, "bin")
+AWG = os.path.join(BIN_DIR, "awg")
+AWG_QUICK = os.path.join(BIN_DIR, "awg-quick")
+
+# Configs live in user home so SteamOS atomic updates don't wipe them.
+CONF_DIR = "/home/deck/.config/amneziawg"
+CMD_TIMEOUT = 30
 
 _CONF_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+\.conf$")
+
+
+def _env() -> dict:
+    """Env for bundled tools: PATH includes our bin/ so awg-quick finds `awg`
+    and `amneziawg-go`. The userspace impl is forced because the kernel
+    module isn't installed on SteamOS — awg-quick falls back to it on
+    `ip link add ... type amneziawg` failure."""
+    return {
+        **os.environ,
+        "PATH": f"{BIN_DIR}:/usr/sbin:/usr/bin:/sbin:/bin",
+        "WG_QUICK_USERSPACE_IMPLEMENTATION": "amneziawg-go",
+        "LC_ALL": "C",
+    }
 
 
 def _valid_conf_name(conf: str) -> bool:
@@ -22,13 +40,26 @@ def _valid_conf_name(conf: str) -> bool:
 
 
 def _run(cmd: list) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=CMD_TIMEOUT)
+    return subprocess.run(
+        cmd, capture_output=True, text=True, timeout=CMD_TIMEOUT, env=_env()
+    )
+
+
+def _ensure_conf_dir():
+    try:
+        os.makedirs(CONF_DIR, exist_ok=True)
+        try:
+            shutil.chown(CONF_DIR, user="deck", group="deck")
+            os.chmod(CONF_DIR, 0o755)
+        except (LookupError, PermissionError) as e:
+            logging.warning(f"chown {CONF_DIR}: {e}")
+    except Exception as e:
+        logging.error(f"_ensure_conf_dir: {e}")
 
 
 class Plugin:
 
     async def get_status(self) -> dict:
-        """Return VPN status: connected flag and list of active interfaces."""
         try:
             result = _run([AWG, "show", "interfaces"])
             if result.returncode != 0:
@@ -42,28 +73,33 @@ class Plugin:
                 "interfaces": ifaces,
             }
         except subprocess.TimeoutExpired:
-            logging.error("get_status: awg show timed out")
+            logging.error("get_status: timed out")
             return {"connected": False, "interface": None, "interfaces": []}
         except FileNotFoundError:
-            logging.error("get_status: 'awg' binary not found")
+            logging.error(f"get_status: bundled binary missing at {AWG}")
             return {"connected": False, "interface": None, "interfaces": []}
         except Exception as e:
             logging.error(f"get_status error: {e}")
             return {"connected": False, "interface": None, "interfaces": []}
 
     async def get_configs(self) -> list:
-        """Return sorted list of available .conf files in CONF_DIR."""
         try:
+            _ensure_conf_dir()
             if not os.path.isdir(CONF_DIR):
                 return []
-            files = [f for f in os.listdir(CONF_DIR) if f.endswith(".conf") and _valid_conf_name(f)]
+            files = [
+                f for f in os.listdir(CONF_DIR)
+                if f.endswith(".conf") and _valid_conf_name(f)
+            ]
             return sorted(files)
         except Exception as e:
             logging.error(f"get_configs error: {e}")
             return []
 
+    async def get_conf_dir(self) -> str:
+        return CONF_DIR
+
     async def connect(self, conf: str) -> dict:
-        """Bring up VPN using awg-quick."""
         if not _valid_conf_name(conf):
             return {"ok": False, "error": "Invalid config name"}
         try:
@@ -76,16 +112,14 @@ class Plugin:
                 return {"ok": False, "error": result.stderr.strip() or "awg-quick up failed"}
             return {"ok": True}
         except subprocess.TimeoutExpired:
-            logging.error("connect: awg-quick up timed out")
             return {"ok": False, "error": "Timeout"}
         except FileNotFoundError:
-            return {"ok": False, "error": "awg-quick not installed"}
+            return {"ok": False, "error": "Bundled awg-quick missing"}
         except Exception as e:
             logging.error(f"connect error: {e}")
             return {"ok": False, "error": str(e)}
 
     async def disconnect(self, conf: str) -> dict:
-        """Bring down VPN using awg-quick."""
         if not _valid_conf_name(conf):
             return {"ok": False, "error": "Invalid config name"}
         try:
@@ -96,16 +130,15 @@ class Plugin:
                 return {"ok": False, "error": result.stderr.strip() or "awg-quick down failed"}
             return {"ok": True}
         except subprocess.TimeoutExpired:
-            logging.error("disconnect: awg-quick down timed out")
             return {"ok": False, "error": "Timeout"}
         except FileNotFoundError:
-            return {"ok": False, "error": "awg-quick not installed"}
+            return {"ok": False, "error": "Bundled awg-quick missing"}
         except Exception as e:
             logging.error(f"disconnect error: {e}")
             return {"ok": False, "error": str(e)}
 
     async def _main(self):
-        pass
+        _ensure_conf_dir()
 
     async def _unload(self):
         pass

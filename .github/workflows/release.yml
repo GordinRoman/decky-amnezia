@@ -10,7 +10,56 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  binaries:
+    name: Build bundled binaries
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install build deps
+        run: |
+          pacman -Sy --noconfirm --needed base-devel git go libmnl file
+          mkdir -p /tmp/out
+
+      # amneziawg-go — pure-Go userspace impl, no kernel module needed.
+      # CGO_ENABLED=0 gives a fully static binary with no libc dependency.
+      - name: Build amneziawg-go
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-go /tmp/amneziawg-go
+          cd /tmp/amneziawg-go
+          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /tmp/out/amneziawg-go .
+        env:
+          GOFLAGS: -mod=mod
+
+      # amneziawg-tools — the C `awg` CLI and bash `awg-quick` script.
+      # Static-link awg so it doesn't depend on whatever libmnl ships on the target.
+      - name: Build amneziawg-tools
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-tools /tmp/amneziawg-tools
+          cd /tmp/amneziawg-tools/src
+          make LDFLAGS="-static" -j"$(nproc)"
+          install -m 0755 wg /tmp/out/awg
+          install -m 0755 wg-quick/linux.bash /tmp/out/awg-quick
+
+      - name: Verify binaries
+        run: |
+          set -euxo pipefail
+          file /tmp/out/amneziawg-go /tmp/out/awg
+          /tmp/out/amneziawg-go --version || true
+          /tmp/out/awg --version
+          head -1 /tmp/out/awg-quick
+
+      - name: Upload binaries artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundled-binaries
+          path: /tmp/out/
+          if-no-files-found: error
+
+  release:
+    name: Build plugin and publish release
+    needs: binaries
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -27,23 +76,32 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Download bundled binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: bundled-binaries
+          path: bundled
+
       - name: Stage plugin folder
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           PLUGIN_NAME=$(node -e "console.log(require('./plugin.json').name)")
           echo "PLUGIN_NAME=$PLUGIN_NAME" >> "$GITHUB_ENV"
           rm -rf package
-          mkdir -p "package/$PLUGIN_NAME/dist"
+          mkdir -p "package/$PLUGIN_NAME/dist" "package/$PLUGIN_NAME/bin"
           cp plugin.json main.py package.json README.md "package/$PLUGIN_NAME/"
           cp dist/index.js "package/$PLUGIN_NAME/dist/index.js"
+          install -m 0755 bundled/amneziawg-go "package/$PLUGIN_NAME/bin/amneziawg-go"
+          install -m 0755 bundled/awg "package/$PLUGIN_NAME/bin/awg"
+          install -m 0755 bundled/awg-quick "package/$PLUGIN_NAME/bin/awg-quick"
 
       - name: Create zip
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           cd package
           zip -r "../${PLUGIN_NAME}.zip" "$PLUGIN_NAME"
 
-      - name: Upload build artifact
+      - name: Upload plugin artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.PLUGIN_NAME }}
