@@ -6,31 +6,39 @@ Self-contained плагин для управления AmneziaWG VPN из Game 
 
 ## Установка
 
-### 1. Включи Developer mode в Decky
+Два пути — выбирай удобный.
 
-Game Mode → `•••` → **Decky** → шестерёнка (Settings) → **Developer** → **Enable Developer mode**.
+### Вариант A. Удалённо с компьютера (рекомендуемый)
 
-### 2. Установи плагин по URL
+В репо есть скрипт [scripts/install-remote.sh](scripts/install-remote.sh) — качает релиз, кладёт в плагины, перезапускает decky-loader:
 
-Decky → **Developer** → **Install Plugin from URL** → вставь:
-
-```
-https://github.com/GordinRoman/decky-amnezia/releases/latest/download/AmneziaWG.zip
-```
-
-### 3. Положи конфиг(и) в `~/.config/amneziawg/`
-
-Через SSH с любой машины:
 ```bash
-ssh deck@<IP_АДРЕС>
-mkdir -p ~/.config/amneziawg
-# затем закинь .conf файл туда (например через scp):
-# scp ./amnezia_for_awg.conf deck@<IP>:~/.config/amneziawg/
+./scripts/install-remote.sh <IP_ДЕКИ>
+# или конкретную версию:
+./scripts/install-remote.sh deck.local v2.0.0
+```
+
+Developer mode в Decky **не нужен** — он включает только UI-кнопку «Install from URL», а скрипт работает в обход неё.
+
+Затем положи конфиг:
+```bash
+scp ./amnezia_for_awg.conf deck@<IP_ДЕКИ>:~/.config/amneziawg/
 ```
 
 Имя файла должно матчить `^[A-Za-z0-9._-]+\.conf$`.
 
-Готово. В Game Mode → `•••` → AmneziaWG → переключи тоггл.
+Если SSH ещё не настроен — на деке: `passwd` (один раз поставить пароль) и `sudo systemctl enable --now sshd`.
+
+### Вариант B. Через UI Decky
+
+1. Game Mode → `•••` → **Decky** → шестерёнка → **Developer** → **Enable Developer mode**
+2. Decky → **Developer** → **Install Plugin from URL** → вставь:
+   ```
+   https://github.com/GordinRoman/decky-amnezia/releases/latest/download/AmneziaWG.zip
+   ```
+3. Положи конфиг в `~/.config/amneziawg/` (всё равно нужен SSH/файл-менеджер)
+
+Готово. В Game Mode → `•••` → **AmneziaWG** → переключи тоггл.
 
 ## Почему обновления SteamOS не ломают плагин
 
