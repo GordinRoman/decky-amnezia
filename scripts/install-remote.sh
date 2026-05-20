@@ -72,6 +72,14 @@ mkdir -p "\$HOME/.config/amneziawg"
 echo "  · restarting plugin_loader.service…"
 sudo systemctl restart plugin_loader.service
 echo "  · done"
+# Detect whether any .conf is already present and surface a sentinel
+# that the local side parses to decide whether to print the upload hint.
+if compgen -G "\$HOME/.config/amneziawg/*.conf" > /dev/null; then
+  count=\$(ls -1 "\$HOME/.config/amneziawg/"*.conf | wc -l)
+  echo "##CONFIG_STATUS:present:\$count"
+else
+  echo "##CONFIG_STATUS:missing"
+fi
 EOF
 )
 
@@ -80,11 +88,23 @@ EOF
 # evaluates — sudo inside reads its password from /dev/tty (allocated by -t).
 ENCODED=$(printf '%s' "$REMOTE_SCRIPT" | base64 | tr -d '\n')
 
+# tee the remote output so the user still sees progress while we capture
+# the CONFIG_STATUS line for our own decisioning.
+SSH_LOG=$(mktemp -t amnezia-install.XXXXXX)
+trap 'rm -f "$SSH_LOG"' EXIT
 ssh -t -o ConnectTimeout=10 "${USER}@${HOST}" \
-  "echo $ENCODED | base64 -d | bash"
+  "echo $ENCODED | base64 -d | bash" | tee "$SSH_LOG"
 
 echo
 echo "✓ Plugin installed on ${HOST}"
-echo
-echo "Drop your .conf into ~/.config/amneziawg/ on the deck, e.g.:"
-echo "  scp ./amnezia.conf ${USER}@${HOST}:~/.config/amneziawg/"
+
+# Strip the trailing \r tmux/ssh -t leaves on lines, then look for the sentinel.
+status_line=$(tr -d '\r' < "$SSH_LOG" | grep '^##CONFIG_STATUS:' | tail -1 || true)
+if [[ "$status_line" == "##CONFIG_STATUS:present:"* ]]; then
+  count="${status_line##*:}"
+  echo "  ${count} config(s) already in ~/.config/amneziawg/ — nothing to upload."
+else
+  echo
+  echo "No .conf yet — drop one onto the deck, e.g.:"
+  echo "  scp ./amnezia.conf ${USER}@${HOST}:~/.config/amneziawg/"
+fi

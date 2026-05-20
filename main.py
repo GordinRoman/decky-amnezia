@@ -26,13 +26,23 @@ def _env() -> dict:
     """Env for bundled tools: PATH includes our bin/ so awg-quick finds `awg`
     and `amneziawg-go`. The userspace impl is forced because the kernel
     module isn't installed on SteamOS — awg-quick falls back to it on
-    `ip link add ... type amneziawg` failure."""
-    return {
-        **os.environ,
+    `ip link add ... type amneziawg` failure.
+
+    Decky-loader injects its own LD_LIBRARY_PATH/LD_PRELOAD that point to
+    its bundled libs (newer than system). When we exec /bin/bash for
+    awg-quick, those libs get pulled in and break readline lookups
+    (`undefined symbol: rl_trim_arg_from_keyseq`). Strip them so system
+    binaries link against system libs."""
+    env = {
+        k: v for k, v in os.environ.items()
+        if k not in ("LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONPATH", "PYTHONHOME")
+    }
+    env.update({
         "PATH": f"{BIN_DIR}:/usr/sbin:/usr/bin:/sbin:/bin",
         "WG_QUICK_USERSPACE_IMPLEMENTATION": "amneziawg-go",
         "LC_ALL": "C",
-    }
+    })
+    return env
 
 
 def _valid_conf_name(conf: str) -> bool:
