@@ -56,15 +56,20 @@ REMOTE_SCRIPT=$(cat <<EOF
 set -euo pipefail
 echo "  · downloading ${ASSET}…"
 curl -fL --progress-bar -o "/tmp/${ASSET}" "${URL}"
+# ~/homebrew/plugins is owned by root (decky-loader runs as root),
+# so the rm/unzip/chmod must go through sudo. Single sudo prompt
+# upfront keeps the timestamp cached for the rest of the session.
+echo "  · authorizing sudo for plugin install…"
+sudo -v
 echo "  · removing old install (if any)…"
-rm -rf "\$HOME/homebrew/plugins/${PLUGIN_NAME}"
-mkdir -p "\$HOME/homebrew/plugins"
+sudo rm -rf "\$HOME/homebrew/plugins/${PLUGIN_NAME}"
+sudo mkdir -p "\$HOME/homebrew/plugins"
 echo "  · extracting to ~/homebrew/plugins/${PLUGIN_NAME}…"
-unzip -q "/tmp/${ASSET}" -d "\$HOME/homebrew/plugins/"
-chmod +x "\$HOME/homebrew/plugins/${PLUGIN_NAME}/bin/"*
+sudo unzip -q "/tmp/${ASSET}" -d "\$HOME/homebrew/plugins/"
+sudo chmod +x "\$HOME/homebrew/plugins/${PLUGIN_NAME}/bin/"*
 rm "/tmp/${ASSET}"
 mkdir -p "\$HOME/.config/amneziawg"
-echo "  · restarting plugin_loader.service (sudo)…"
+echo "  · restarting plugin_loader.service…"
 sudo systemctl restart plugin_loader.service
 echo "  · done"
 EOF
