@@ -60,9 +60,17 @@ def _ensure_conf_dir():
         os.makedirs(CONF_DIR, exist_ok=True)
         try:
             shutil.chown(CONF_DIR, user="deck", group="deck")
-            os.chmod(CONF_DIR, 0o755)
+            os.chmod(CONF_DIR, 0o700)
         except (LookupError, PermissionError) as e:
             logging.warning(f"chown {CONF_DIR}: {e}")
+        # Lock down .conf perms — awg-quick warns when configs are
+        # world-readable (they contain private keys).
+        for f in os.listdir(CONF_DIR):
+            if f.endswith(".conf"):
+                try:
+                    os.chmod(os.path.join(CONF_DIR, f), 0o600)
+                except OSError:
+                    pass
     except Exception as e:
         logging.error(f"_ensure_conf_dir: {e}")
 

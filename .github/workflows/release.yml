@@ -38,6 +38,13 @@ jobs:
           set -euxo pipefail
           git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-tools /tmp/amneziawg-tools
           cd /tmp/amneziawg-tools/src
+          # Upstream bug: get_value() in config.c uses `keylen >= linelen`,
+          # which makes `awg setconf` reject lines like `I2=` (empty value)
+          # with "Line unrecognized". AmneziaWG configs commonly contain
+          # empty I2-I5 placeholders. Relax to a strict `>` so empty
+          # values reach parse_awg_string (which handles them).
+          sed -i 's|if (keylen >= linelen)|if (keylen > linelen)|' config.c
+          grep -q 'if (keylen > linelen)' config.c
           make LDFLAGS="-static" -j"$(nproc)"
           install -m 0755 wg /tmp/out/awg
           install -m 0755 wg-quick/linux.bash /tmp/out/awg-quick
@@ -94,6 +101,8 @@ jobs:
           install -m 0755 bundled/amneziawg-go "package/$PLUGIN_NAME/bin/amneziawg-go"
           install -m 0755 bundled/awg "package/$PLUGIN_NAME/bin/awg"
           install -m 0755 bundled/awg-quick "package/$PLUGIN_NAME/bin/awg-quick"
+          # Shims (override system-missing tools so PATH-first lookup finds them).
+          install -m 0755 shims/resolvconf "package/$PLUGIN_NAME/bin/resolvconf"
 
       - name: Create zip
         run: |

@@ -1,0 +1,60 @@
+#!/bin/bash
+# resolvconf shim for SteamOS (systemd-resolved).
+#
+# Implements just enough of the resolvconf(8) interface to satisfy
+# awg-quick's set_dns / unset_dns calls. Anything else is silently
+# accepted and ignored.
+#
+# Calls we translate:
+#   resolvconf -a <iface> -m 0 -x      ← stdin contains "nameserver A.B.C.D"
+#                                        and optional "search foo bar"; passed
+#                                        to `resolvectl dns/domain <iface> ...`
+#   resolvconf -d <iface> -f           ← `resolvectl revert <iface>`
+#
+# If systemd-resolved isn't running, we exit 0 without changing anything
+# so awg-quick can continue bringing up the tunnel (DNS just won't be set).
+
+set -e
+
+action=""
+iface=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -a) action="add"; iface="$2"; shift 2 ;;
+    -d) action="del"; iface="$2"; shift 2 ;;
+    -m|-p) shift 2 ;;
+    -x|-f|-l) shift ;;
+    *) shift ;;
+  esac
+done
+
+[[ -z "$action" || -z "$iface" ]] && exit 0
+
+if ! command -v resolvectl >/dev/null 2>&1; then
+  echo "resolvconf-shim: resolvectl not present; DNS not configured" >&2
+  exit 0
+fi
+
+# Strip any prefix wg-quick may have stuck on (e.g. tun. for resolvconf-iface-order).
+iface="${iface##*.}"
+
+case "$action" in
+  add)
+    nameservers=()
+    searches=()
+    while IFS= read -r line; do
+      case "$line" in
+        nameserver" "*) nameservers+=("${line#nameserver }") ;;
+        search" "*)     for s in ${line#search }; do searches+=("$s"); done ;;
+      esac
+    done
+    [[ ${#nameservers[@]} -gt 0 ]] && resolvectl dns "$iface" "${nameservers[@]}" || true
+    [[ ${#searches[@]} -gt 0 ]] && resolvectl domain "$iface" "${searches[@]}" || true
+    ;;
+  del)
+    resolvectl revert "$iface" 2>/dev/null || true
+    ;;
+esac
+
+exit 0
