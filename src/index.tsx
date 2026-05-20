@@ -10,7 +10,7 @@ import {
   staticClasses,
 } from "decky-frontend-lib";
 import { useState, useEffect, useRef, VFC } from "react";
-import { FaShield } from "react-icons/fa";
+import { FaShieldAlt } from "react-icons/fa";
 
 interface Status {
   connected: boolean;
@@ -195,7 +195,7 @@ export default definePlugin((serverApi: ServerAPI) => {
   return {
     title: <div className={staticClasses.Title}>AmneziaWG</div>,
     content: <Content serverAPI={serverApi} />,
-    icon: <FaShield />,
+    icon: <FaShieldAlt />,
     onDismount() {},
   };
 });
