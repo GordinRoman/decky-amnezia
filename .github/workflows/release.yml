@@ -1,0 +1,59 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Stage plugin folder
+        run: |
+          set -euo pipefail
+          PLUGIN_NAME=$(node -e "console.log(require('./plugin.json').name)")
+          echo "PLUGIN_NAME=$PLUGIN_NAME" >> "$GITHUB_ENV"
+          rm -rf package
+          mkdir -p "package/$PLUGIN_NAME/dist"
+          cp plugin.json main.py package.json README.md "package/$PLUGIN_NAME/"
+          cp dist/index.js "package/$PLUGIN_NAME/dist/index.js"
+
+      - name: Create zip
+        run: |
+          set -euo pipefail
+          cd package
+          zip -r "../${PLUGIN_NAME}.zip" "$PLUGIN_NAME"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PLUGIN_NAME }}
+          path: ${{ env.PLUGIN_NAME }}.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.PLUGIN_NAME }}.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: true

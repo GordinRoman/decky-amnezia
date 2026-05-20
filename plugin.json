@@ -1,0 +1,10 @@
+{
+  "name": "AmneziaWG",
+  "author": "deck",
+  "flags": ["root"],
+  "publish": {
+    "tags": ["vpn", "network", "amnezia"],
+    "description": "AmneziaWG VPN toggle for Steam Deck",
+    "image": ""
+  }
+}
