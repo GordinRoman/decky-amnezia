@@ -53,7 +53,12 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
   };
 
   useEffect(() => {
-    Promise.all([fetchStatus(), fetchConfigs()]).finally(() => setLoading(false));
+    // Only gate the initial spinner on get_configs (fast — just listdir).
+    // Status fetch runs in parallel and updates whenever it returns; the UI
+    // shouldn't block on it because `awg show` can briefly hang while the
+    // userspace amneziawg-go daemon is coming up after a connect.
+    fetchConfigs().finally(() => setLoading(false));
+    fetchStatus();
     const interval = setInterval(fetchStatus, 5000);
     return () => clearInterval(interval);
   }, []);
@@ -132,7 +137,11 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
 
       <PanelSectionRow>
         <ToggleField
-          label={toggling ? "Подождите..." : status.connected ? "Выключить VPN" : "Включить VPN"}
+          label={
+            toggling
+              ? (status.connected ? "Отключаюсь…" : "Подключаюсь…")
+              : (status.connected ? "Выключить VPN" : "Включить VPN")
+          }
           checked={status.connected}
           disabled={toggling || !activeConf}
           onChange={handleToggle}

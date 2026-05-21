@@ -17,7 +17,12 @@ AWG_QUICK = os.path.join(BIN_DIR, "awg-quick")
 
 # Configs live in user home so SteamOS atomic updates don't wipe them.
 CONF_DIR = "/home/deck/.config/amneziawg"
-CMD_TIMEOUT = 30
+# Quick lookups (awg show) should be ~instant.
+STATUS_TIMEOUT = 10
+# awg-quick up/down via userspace amneziawg-go can take a while on first
+# handshake — the daemon has to fork, open TUN, exchange keys, and only
+# then setconf/ip add/resolvconf can run.
+QUICK_TIMEOUT = 60
 
 _CONF_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+\.conf$")
 
@@ -49,10 +54,19 @@ def _valid_conf_name(conf: str) -> bool:
     return bool(conf) and _CONF_NAME_RE.match(conf) is not None and ".." not in conf
 
 
-def _run(cmd: list) -> subprocess.CompletedProcess:
+def _run(cmd: list, timeout: int = STATUS_TIMEOUT) -> subprocess.CompletedProcess:
     return subprocess.run(
-        cmd, capture_output=True, text=True, timeout=CMD_TIMEOUT, env=_env()
+        cmd, capture_output=True, text=True, timeout=timeout, env=_env()
     )
+
+
+def _is_iface_up(iface: str) -> bool:
+    """Quick check: is the given amneziawg interface present?"""
+    try:
+        r = _run([AWG, "show", "interfaces"])
+        return iface in r.stdout.split()
+    except Exception:
+        return False
 
 
 def _ensure_conf_dir():
@@ -120,16 +134,23 @@ class Plugin:
     async def connect(self, conf: str) -> dict:
         if not _valid_conf_name(conf):
             return {"ok": False, "error": "Invalid config name"}
+        iface = conf[:-5]  # strip .conf
         try:
             conf_path = os.path.join(CONF_DIR, conf)
             if not os.path.isfile(conf_path):
                 return {"ok": False, "error": f"Config not found: {conf}"}
-            result = _run([AWG_QUICK, "up", conf_path])
+            result = _run([AWG_QUICK, "up", conf_path], timeout=QUICK_TIMEOUT)
             if result.returncode != 0:
                 logging.error(f"connect stderr: {result.stderr}")
                 return {"ok": False, "error": result.stderr.strip() or "awg-quick up failed"}
             return {"ok": True}
         except subprocess.TimeoutExpired:
+            # awg-quick was killed, but amneziawg-go forked off — the
+            # interface may already be up. Treat that as success rather
+            # than scaring the user with a Timeout error.
+            if _is_iface_up(iface):
+                logging.warning(f"connect: awg-quick timed out but {iface} is up")
+                return {"ok": True}
             return {"ok": False, "error": "Timeout"}
         except FileNotFoundError:
             return {"ok": False, "error": "Bundled awg-quick missing"}
@@ -140,14 +161,20 @@ class Plugin:
     async def disconnect(self, conf: str) -> dict:
         if not _valid_conf_name(conf):
             return {"ok": False, "error": "Invalid config name"}
+        iface = conf[:-5]
         try:
             conf_path = os.path.join(CONF_DIR, conf)
-            result = _run([AWG_QUICK, "down", conf_path])
+            result = _run([AWG_QUICK, "down", conf_path], timeout=QUICK_TIMEOUT)
             if result.returncode != 0:
                 logging.error(f"disconnect stderr: {result.stderr}")
                 return {"ok": False, "error": result.stderr.strip() or "awg-quick down failed"}
             return {"ok": True}
         except subprocess.TimeoutExpired:
+            # Mirror image of connect's timeout handling: if the iface
+            # is already gone, the down completed despite the kill.
+            if not _is_iface_up(iface):
+                logging.warning(f"disconnect: awg-quick timed out but {iface} is gone")
+                return {"ok": True}
             return {"ok": False, "error": "Timeout"}
         except FileNotFoundError:
             return {"ok": False, "error": "Bundled awg-quick missing"}
