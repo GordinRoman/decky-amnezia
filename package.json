@@ -2,6 +2,7 @@
   "name": "amnezia-decky",
   "version": "1.0.0",
   "description": "AmneziaWG VPN plugin for Decky Loader",
+  "type": "module",
   "scripts": {
     "build": "rollup -c",
     "watch": "rollup -c -w"
@@ -11,6 +12,8 @@
     "@rollup/plugin-node-resolve": "^15.0.0",
     "@rollup/plugin-replace": "^5.0.0",
     "@rollup/plugin-typescript": "^11.0.0",
+    "@types/react": "^17.0.0",
+    "@types/react-dom": "^17.0.0",
     "decky-frontend-lib": "^3.25.0",
     "react-icons": "^4.12.0",
     "rollup": "^3.0.0",
